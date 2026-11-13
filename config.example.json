@@ -1,0 +1,37 @@
+{
+  "testnet": true,
+  "live_confirm": "",
+  "api_key": "在这里填 API Key",
+  "api_secret": "在这里填 API Secret",
+
+  "symbols": ["BTCUSDT", "ETHUSDT", "SOLUSDT"],
+  "interval": "4h",
+
+  "strategy": {
+    "ema_fast": 21,
+    "ema_slow": 55,
+    "ema_trend": 200,
+    "donchian": 20,
+    "adx_len": 14,
+    "adx_min": 20,
+    "atr_len": 14,
+    "stop_atr": 2.0,
+    "trail_atr": 3.0
+  },
+
+  "risk": {
+    "risk_per_trade": 0.01,
+    "max_leverage": 3,
+    "max_positions": 2,
+    "daily_loss_limit": 0.03,
+    "max_consecutive_losses": 4,
+    "pause_hours": 24,
+    "max_drawdown_kill": 0.20
+  },
+
+  "notify": {
+    "serverchan_key": "",
+    "telegram_token": "",
+    "telegram_chat_id": ""
+  }
+}

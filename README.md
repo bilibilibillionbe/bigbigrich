@@ -1,2 +1,120 @@
-# bigbigrich
-Be a big rich man 
+# bigbigrich：币安 U 本位合约自动交易机器人
+
+趋势跟踪策略，在 Windows 电脑上 24 小时运行。每笔交易都自带交易所服务器端止损，并内置多重风控熔断。
+
+## 策略说明
+
+这是一个基于经典实战趋势系统的组合：海龟通道突破、均线多空过滤、ADX 趋势强度、ATR 吊灯止损。
+
+| 规则 | 做多（做空对称） |
+|---|---|
+| 大方向 | 收盘价 > EMA200 |
+| 中期趋势 | EMA21 > EMA55 |
+| 过滤震荡 | ADX(14) > 20 |
+| 入场 | 4 小时 K 线收盘价突破前 20 根最高价 |
+| 初始止损 | 入场价 − 2 × ATR，挂在币安服务器上，电脑关机也有效 |
+| 移动止损 | 持仓最高价 − 3 × ATR，只上移不下移 |
+| 反转离场 | EMA21 下穿 EMA55 |
+
+这个策略胜率只有 30% 左右，靠“亏小赚大”盈利：平均每笔盈利约是平均亏损的 2.5 倍。连续亏 10 笔以上是正常现象，不要因此手动干预。
+
+## 回测结果（真实历史数据，已扣手续费和滑点）
+
+BTC + ETH + SOL，4 小时周期，1000 USDT 起始资金，每笔风险 1%，最高 3 倍杠杆：
+
+| 年份 | 2021 | 2022 | 2023 | 2024 | 2025 | 2026 至 11 月 |
+|---|---|---|---|---|---|---|
+| 收益 | −10.2% | +13.2% | +43.2% | +7.9% | +13.0% | +18.7% |
+
+- 2021-01 至 2026-11 合计 **+110%**，年化约 **13.5%**，最大回撤 **−21.5%**，共 599 笔交易
+- 1 小时周期在同一时段基本不赚钱（−1.7%，回撤 −59%），手续费吃掉了利润，所以默认用 4 小时
+- 网格优化出的“最优参数”在样本外（2025-02 之后）并不比默认参数好（+27% 对 +31%），说明默认参数没有过拟合，所以保留默认值
+
+回测不等于未来。资金费率没有计入回测，实盘结果会和回测有偏差。
+
+## 安装（Windows）
+
+1. 安装 [Python 3.10+](https://www.python.org/downloads/)。安装时勾选 **Add python.exe to PATH**。
+2. 下载本项目：GitHub 页面 → Code → Download ZIP，然后解压。
+3. 双击 **`setup.bat`**。它会自动创建环境、安装依赖，并生成 `config.json`。
+
+## 第一步：先用测试网跑（模拟资金）
+
+1. 打开 https://testnet.binancefuture.com ，登录后在页面下方的 API Key 处获取测试网 Key。
+2. 用记事本打开 `config.json`，填入 `api_key` 和 `api_secret`，保持 `"testnet": true`。
+3. 在币安合约设置里确认是**单向持仓**模式（测试网和实盘都要确认）。
+4. 双击 **`start_bot.bat`** 启动。窗口会显示日志，同时写入 `logs/bot.log`。
+
+建议在测试网至少跑 2～4 周，确认开仓、止损、移动止损、平仓都正常。
+
+## 第二步：切换到实盘
+
+1. 在币安官网创建 API Key：
+   - 只勾选“允许合约交易”，**不要勾选“允许提现”**
+   - 绑定你电脑的 IP 白名单
+2. `config.json` 中修改：
+   ```json
+   "testnet": false,
+   "live_confirm": "YES",
+   "api_key": "实盘 Key",
+   "api_secret": "实盘 Secret"
+   ```
+3. 实盘和测试网使用不同的状态文件（`state_live.json` / `state_testnet.json`），互不干扰。
+
+## 风控参数（config.json → risk）
+
+| 参数 | 默认 | 含义 |
+|---|---|---|
+| `risk_per_trade` | 0.01 | 每笔止损最多亏总资金的 1% |
+| `max_leverage` | 3 | 杠杆上限；总持仓名义价值不超过资金 × 3 |
+| `max_positions` | 2 | 最多同时持有 2 个币种 |
+| `daily_loss_limit` | 0.03 | 当天亏损 3% 后当天不再开仓 |
+| `max_consecutive_losses` | 4 | 连亏 4 笔后暂停 `pause_hours` 小时 |
+| `max_drawdown_kill` | 0.20 | 从最高点回撤 20% 后停止开仓 |
+
+回撤熔断触发后，已有仓位仍由止损保护，但不会再开新仓。确认没问题后，把 `state_live.json` 里的 `"killed": true` 改成 `false`，再重启机器人。
+
+**最小资金**：币安单笔最小名义价值约 5～100 USDT（不同币种不一样）。资金太少时，按 1% 风险算出来的仓位会低于这个下限，机器人会跳过开仓。建议资金不少于 500 USDT。
+
+## 手机通知（可选）
+
+在 `config.json → notify` 中二选一：
+
+- **Server酱**（推送到微信）：到 https://sct.ftqq.com 获取 SendKey，填入 `serverchan_key`
+- **Telegram**：填写 `telegram_token` 和 `telegram_chat_id`
+
+开仓、平仓、熔断、异常都会推送。
+
+## 24 小时运行注意事项
+
+- **关闭睡眠**：设置 → 系统 → 电源 → “屏幕和睡眠”里，“接通电源后进入睡眠”设为“从不”。
+- **开机自启**：按 `Win+R` 输入 `shell:startup`，把 `start_bot.bat` 的快捷方式放进打开的文件夹。
+- **断网或关机**：交易所上的止损单依然有效。重启后机器人会读取状态文件，继续管理原来的仓位。
+- **不要手动修改机器人的仓位或止损单**。如果你在同一币种上手动开仓，机器人会跳过这个币种，直到该仓位平掉。
+- 不要同时开两个机器人窗口。
+
+## 常用命令
+
+```bat
+backtest.bat                                  :: 回测 2021 年至今
+backtest.bat --interval 1h                    :: 换周期回测
+backtest.bat --symbols BTCUSDT DOGEUSDT       :: 换币种回测
+backtest.bat --optimize                       :: 参数网格搜索 + 样本外验证
+.venv\Scripts\python tests\sim_trader.py      :: 用历史数据模拟实盘逻辑自检
+```
+
+想加新币种，先用 `backtest.bat --symbols XXXUSDT` 回测。回测赚钱再加入 `config.json` 的 `symbols`。
+
+## 文件结构
+
+```
+trade.py              实盘入口
+backtest.py           回测/优化入口
+bot/strategy.py       策略（回测和实盘共用）
+bot/risk.py           仓位计算与熔断
+bot/trader.py         实盘主循环
+bot/binance_client.py 币安 API（止损使用新版 Algo 条件单接口）
+bot/backtest.py       回测引擎
+bot/data.py           历史数据下载（data.binance.vision）
+tests/sim_trader.py   模拟交易所自检
+```
