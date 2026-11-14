@@ -78,7 +78,7 @@ class RiskState:
         return dict(self.__dict__)
 
     def update_equity(self, equity: float, day: str):
-        if day != self.day:
+        if day != self.day or self.day_start_equity <= 0:
             self.day = day
             self.day_start_equity = equity
         self.peak_equity = max(self.peak_equity, equity)
