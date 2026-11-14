@@ -74,7 +74,21 @@ class Trader:
         c = self.client
         c.sync_time()
         if c.is_hedge_mode():
-            raise SystemExit("账户是“双向持仓”模式，请在币安合约设置里改成“单向持仓”后再运行。")
+            log.info("账户是双向持仓模式，尝试自动切换为单向持仓…")
+            try:
+                c.set_one_way()
+            except BinanceError as e:
+                reasons = {
+                    -4067: "账户里还有未成交的挂单（包括止盈止损单），请先全部撤销",
+                    -4068: "账户里还有持仓，请先全部平仓",
+                }
+                hint = reasons.get(e.code, "")
+                raise SystemExit(f"无法切换为单向持仓：{e}\n{hint}\n"
+                                 "注意：U 本位和币本位合约里的仓位、挂单都要清掉；"
+                                 "如果 API Key 是子账户创建的，要在那个子账户里操作。")
+            if c.is_hedge_mode():
+                raise SystemExit("自动切换失败，请在币安合约设置里手动改成“单向持仓”。")
+            log.info("已切换为单向持仓")
         wallet, avail = c.usdt_balance()
         # 首次启动不追已经过去的信号，从下一根 K 线收盘开始
         first = (now_ms() // self.ims) * self.ims - self.ims

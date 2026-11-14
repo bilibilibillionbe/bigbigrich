@@ -158,6 +158,15 @@ class BinanceFutures:
     def is_hedge_mode(self) -> bool:
         return bool(self._request("GET", "/fapi/v1/positionSide/dual", signed=True)["dualSidePosition"])
 
+    def set_one_way(self):
+        """切换为单向持仓。账户有持仓/挂单时币安会拒绝。"""
+        try:
+            self._request("POST", "/fapi/v1/positionSide/dual",
+                          {"dualSidePosition": "false"}, signed=True)
+        except BinanceError as e:
+            if e.code != -4059:  # -4059: 已经是单向，无需修改
+                raise
+
     def set_leverage(self, symbol: str, leverage: int):
         return self._request("POST", "/fapi/v1/leverage",
                              {"symbol": symbol, "leverage": leverage}, signed=True)
