@@ -27,6 +27,28 @@ class RiskConfig:
         return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
 
 
+# 预设模式。custom = 使用 config.json 里 "risk" 的自定义数值
+PRESETS = {
+    "standard": RiskConfig(),
+    "aggressive": RiskConfig(risk_per_trade=0.03, max_leverage=10, max_positions=2,
+                             daily_loss_limit=0.15, max_consecutive_losses=6, pause_hours=12,
+                             max_drawdown_kill=0.60),
+    # 极度激进：每笔赌 10%，不设日内/连亏限制，资金只剩峰值的 10% 时停止
+    "extreme": RiskConfig(risk_per_trade=0.10, max_leverage=20, max_positions=3,
+                          daily_loss_limit=1.0, max_consecutive_losses=10_000, pause_hours=0,
+                          max_drawdown_kill=0.90),
+}
+
+
+def resolve(cfg: dict) -> RiskConfig:
+    mode = cfg.get("mode", "custom" if "risk" in cfg else "standard")
+    if mode == "custom":
+        return RiskConfig.from_dict(cfg.get("risk"))
+    if mode not in PRESETS:
+        raise ValueError(f"未知模式 {mode}，可选：{', '.join(PRESETS)}, custom")
+    return RiskConfig(**PRESETS[mode].__dict__)
+
+
 def position_size(equity: float, entry: float, stop: float, cfg: RiskConfig,
                   used_notional: float = 0.0) -> float:
     """按“止损亏损 = 资金 × risk_per_trade”反推数量，再受杠杆上限约束。"""

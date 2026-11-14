@@ -17,7 +17,7 @@ from pathlib import Path
 
 from bot import backtest as bt
 from bot import data
-from bot.risk import RiskConfig
+from bot.risk import resolve
 from bot.strategy import Params
 
 
@@ -46,11 +46,12 @@ def main():
     ap.add_argument("--end", default=None)
     ap.add_argument("--capital", type=float, default=1000)
     ap.add_argument("--optimize", action="store_true")
+    ap.add_argument("--mode", choices=["standard", "aggressive", "extreme", "custom"], default=None)
     ap.add_argument("--no-kill", action="store_true", help="关闭回撤熔断，看策略本身的表现")
     a = ap.parse_args()
 
     p = Params.from_dict(cfg.get("strategy"))
-    rc = RiskConfig.from_dict(cfg.get("risk"))
+    rc = resolve({**cfg, **({"mode": a.mode} if a.mode else {})})
     if a.no_kill or a.optimize:   # 优化时关闭熔断，否则熔断后不再交易会扭曲评分
         rc.max_drawdown_kill = 1.0
     dfs = {s: data.load(s, a.interval, a.start, a.end) for s in a.symbols}

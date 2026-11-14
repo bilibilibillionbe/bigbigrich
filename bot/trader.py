@@ -16,7 +16,7 @@ from pathlib import Path
 
 from .binance_client import BinanceError, BinanceFutures
 from .notify import Notifier
-from .risk import RiskConfig, RiskState, position_size
+from .risk import RiskState, position_size, resolve
 from .strategy import Params, indicators, initial_stop, klines_to_df, trail_stop
 
 log = logging.getLogger(__name__)
@@ -41,7 +41,9 @@ class Trader:
             raise ValueError(f"不支持的周期 {self.interval}")
         self.ims = INTERVAL_MS[self.interval]
         self.p = Params.from_dict(cfg.get("strategy"))
-        self.rc = RiskConfig.from_dict(cfg.get("risk"))
+        self.rc = resolve(cfg)
+        self.mode = cfg.get("mode", "custom")
+        self.capital_cap = float(cfg.get("capital_cap", 0) or 0)
         self.client = BinanceFutures(cfg["api_key"], cfg["api_secret"], testnet=self.testnet)
         tag = "[测试网] " if self.testnet else "[实盘] "
         self.notify = Notifier(cfg.get("notify"), prefix=tag)
@@ -79,6 +81,9 @@ class Trader:
         for s in self.symbols:
             self.state["last_bar"].setdefault(s, first)
         log.info("USDT 钱包余额 %.2f，可用 %.2f", wallet, avail)
+        log.info("模式 %s：每笔风险 %.0f%%，杠杆上限 %dx，最多 %d 仓，交易本金 %s",
+                 self.mode, self.rc.risk_per_trade * 100, self.rc.max_leverage, self.rc.max_positions,
+                 f"{self.capital_cap:.0f} USDT" if self.capital_cap > 0 else "全部余额")
         for s in self.symbols:
             c.rules(s)
             pos = c.position(s)
@@ -112,6 +117,10 @@ class Trader:
         wallet, _ = c.usdt_balance()
         live_pos = {s: c.position(s) for s in self.symbols}
         equity = float(wallet + sum(p["upnl"] for p in live_pos.values()))
+        if self.capital_cap > 0:
+            # 只用划定的本金交易：本金 + 机器人累计盈亏 + 机器人持仓浮盈，且不超过账户实际权益
+            bot_upnl = sum(live_pos[k]["upnl"] for k in self.positions if k in live_pos)
+            equity = min(equity, self.capital_cap + self.state.get("bot_pnl", 0.0) + bot_upnl)
         day = datetime.fromtimestamp(t / 1000, timezone.utc).strftime("%Y-%m-%d")
         self.risk.update_equity(equity, day)
 
@@ -193,6 +202,19 @@ class Trader:
         qty_s = rules.qty(position_size(equity, price, stop, self.rc, used))
         if float(qty_s) <= 0 or float(qty_s) * price < float(rules.min_notional):
             log.info("%s 资金不足以满足最小下单额 %s USDT，跳过", s, rules.min_notional)
+            return
+        # 逐仓杠杆：保证强平价远在止损价之外（先止损、不被强平），同时不超过上限
+        stop_pct = abs(price - stop) / price
+        lev = max(1, min(self.rc.max_leverage, int(1 / (stop_pct * 1.3 + 0.01))))
+        need_margin = float(qty_s) * price / lev
+        _, avail = c.usdt_balance()
+        if need_margin > avail * 0.95:
+            log.info("%s 可用保证金不足（需要 %.2f，可用 %.2f），跳过", s, need_margin, avail)
+            return
+        try:
+            c.set_leverage(s, lev)
+        except BinanceError as e:
+            log.warning("%s 设置杠杆 %dx 失败：%s", s, lev, e)
             return
         order_side = "BUY" if side > 0 else "SELL"
         r = c.market_order(s, order_side, qty_s)
@@ -278,6 +300,7 @@ class Trader:
             log.warning("查询盈亏失败：%s", e)
             pnl = 0.0
         self.risk.record_trade(pnl, now_ms(), self.rc)
+        self.state["bot_pnl"] = self.state.get("bot_pnl", 0.0) + pnl
         self.positions.pop(s, None)
         self._save()
         self.notify.send(f"{s} 平仓 {'盈利' if pnl >= 0 else '亏损'} {pnl:+.2f} USDT", reason)
