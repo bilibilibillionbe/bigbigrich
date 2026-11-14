@@ -107,11 +107,25 @@ class Trader:
                 continue
             try:
                 c.set_isolated(s)
-                c.set_leverage(s, self.rc.max_leverage)
+                self._set_leverage(s, self.rc.max_leverage)
             except BinanceError as e:
                 log.warning("%s 设置逐仓/杠杆失败：%s", s, e)
         self.notify.send("机器人已启动",
                          f"币种 {','.join(self.symbols)} 周期 {self.interval} 余额 {wallet:.2f} USDT")
+
+    def _set_leverage(self, s, lev) -> int:
+        """设置杠杆；子账户被限制最高 5 倍 (-4421) 时自动下调上限并重试。"""
+        try:
+            self.client.set_leverage(s, lev)
+            return lev
+        except BinanceError as e:
+            if e.code != -4421 or lev <= 5:
+                raise
+            if self.rc.max_leverage > 5:
+                log.info("子账户杠杆最高 5 倍，杠杆上限自动调整为 5x")
+                self.rc.max_leverage = 5
+            self.client.set_leverage(s, 5)
+            return 5
 
     # --------------------------------------------------------------- 主循环
     def run_forever(self):
@@ -226,7 +240,7 @@ class Trader:
             log.info("%s 可用保证金不足（需要 %.2f，可用 %.2f），跳过", s, need_margin, avail)
             return
         try:
-            c.set_leverage(s, lev)
+            lev = self._set_leverage(s, lev)
         except BinanceError as e:
             log.warning("%s 设置杠杆 %dx 失败：%s", s, lev, e)
             return
