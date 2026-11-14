@@ -255,6 +255,10 @@ class Trader:
             self._close(s, st, pos, "价格已越过止损，市价平仓")
             return
         log.warning("%s 没找到止损单，重新挂单 %s", s, st["stop"])
+        st["restops"] = st.get("restops", 0) + 1
+        if st["restops"] == 3:
+            self.notify.send(f"{s} 止损单反复丢失", "请在币安 App 里检查该仓位的止损单是否正常")
+        c.cancel_all_algo(s)   # 先清掉残留条件单，保证同一仓位最多只有一张止损
         rules = c.rules(s)
         try:
             st["algo_id"] = c.place_stop(s, "SELL" if side > 0 else "BUY",
